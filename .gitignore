@@ -1,0 +1,24 @@
+# --- Python (Backend) ---
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.pytest_cache/
+backend/venv/
+
+# --- Node/React (Frontend) ---
+node_modules/
+frontend/node_modules/
+npm-debug.log
+build/
+dist/
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# --- Sistem Dosyaları (Gereksiz) ---
+.DS_Store
+Thumbs.db
