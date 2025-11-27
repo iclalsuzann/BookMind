@@ -22,3 +22,6 @@ dist/
 # --- Sistem Dosyaları (Gereksiz) ---
 .DS_Store
 Thumbs.db
+
+# --- Güvenlik (ÖNEMLİ) ---
+backend/serviceAccountKey.json

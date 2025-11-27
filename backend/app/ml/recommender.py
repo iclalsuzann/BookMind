@@ -38,6 +38,9 @@ class Recommender:
             'Image-URL-M': 'image_url'
         }, inplace=True)
 
+        # book_id sütunundaki tüm verileri zorla String (Yazı) yap.
+        self.books_data['book_id'] = self.books_data['book_id'].astype(str)
+        
         # 3. Eksik Verileri Temizle
         if 'title' in self.books_data.columns:
             self.books_data['title'] = self.books_data['title'].fillna('')

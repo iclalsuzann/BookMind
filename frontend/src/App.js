@@ -1,266 +1,293 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './App.css';
 
 const API_URL = "http://localhost:5000/api";
 
-function App() {
-  const [token, setToken] = useState(null);
-  const [user, setUser] = useState(null);
-  const [view, setView] = useState("auth"); // auth, home, profile
+/**
+ * Global API Helper: Toggle Like on a Review
+ */
+const toggleLike = async (ratingId, userId) => {
+  try {
+    await fetch(`${API_URL}/books/ratings/${ratingId}/like`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId })
+    });
+    return true;
+  } catch (e) { return false; }
+};
 
-  // Oturum Açma / Kayıt Olma İşlemi
-  const handleAuth = async (type, email, password, displayName) => {
+function App() {
+  // Initialize state from localStorage to persist session
+  const [, setToken] = useState(localStorage.getItem('token') || null);
+  const [user, setUser] = useState(() => {
+    const savedUser = localStorage.getItem('user');
+    return savedUser ? JSON.parse(savedUser) : null;
+  });
+  
+  const [view, setView] = useState(user ? "home" : "auth"); 
+  const [targetUserId, setTargetUserId] = useState(null);
+  const [activeBookId, setActiveBookId] = useState(null);
+
+  // Expose user globally for helper components
+  window.currentUser = user; 
+
+  // --- Authentication Handlers ---
+
+  const handleAuth = async (type, email, password, username) => {
     const endpoint = type === "login" ? "login" : "register";
     try {
       const res = await fetch(`${API_URL}/auth/${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password, display_name: displayName })
+        body: JSON.stringify({ 
+          username: username, 
+          password: password, 
+          email: type === "register" ? email : undefined 
+        })
       });
       const data = await res.json();
       
       if (res.ok) {
         if (type === "register") {
-          alert("Kayıt Başarılı! Şimdi giriş yapabilirsiniz.");
+          alert("Registration Successful! Please Login."); 
           return;
         }
+        
+        // Persist session
+        localStorage.setItem('token', data.token);
+        localStorage.setItem('user', JSON.stringify(data));
+
         setToken(data.token);
         setUser(data);
         setView("home");
       } else {
-        alert(data.error || "İşlem başarısız.");
+        alert(data.error || "Operation failed.");
       }
-    } catch (err) { alert("Sunucuya bağlanılamadı."); }
+    } catch (err) { alert("Server connection error."); }
   };
 
-  const handleLogout = () => {
-    setToken(null);
-    setUser(null);
-    setView("auth");
+  const handleLogout = () => { 
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    setToken(null); 
+    setUser(null); 
+    setView("auth"); 
   };
 
+  // --- Navigation Handlers ---
+
+  const goToUserProfile = (uid) => {
+    if (uid === user.uid) {
+      setView("profile"); 
+    } else {
+      setTargetUserId(uid);
+      setView("public_profile");
+    }
+  };
+
+  const goToBookDetail = (bookId) => {
+    setActiveBookId(bookId);
+    setView("book_detail");
+  };
+
+  // --- Main Render ---
   return (
     <div className="App">
       {user && <Navbar user={user} setView={setView} onLogout={handleLogout} activeView={view} />}
       
       <div className="main-content">
         {view === "auth" && <AuthView onAuth={handleAuth} />}
-        {view === "home" && <HomeView user={user} />}
-        {view === "profile" && <ProfileView user={user} />}
+        
+        {view === "home" && <HomeView user={user} onBookClick={goToBookDetail} />}
+        
+        {view === "profile" && <ProfileView user={user} onBookClick={goToBookDetail} />}
+        
+        {view === "community" && (
+          <CommunityView 
+            onUserClick={goToUserProfile} 
+            onBookClick={goToBookDetail} 
+          />
+        )}
+        
+        {view === "public_profile" && (
+          <PublicProfileView 
+            targetUserId={targetUserId} 
+            onBack={() => setView("community")} 
+            onBookClick={goToBookDetail} 
+          />
+        )}
+        
+        {view === "book_detail" && (
+          <BookDetailView 
+            bookId={activeBookId} 
+            user={user} 
+            onBack={() => setView("home")} 
+          />
+        )}
       </div>
     </div>
   );
 }
 
-// --- BİLEŞENLER ---
+// ==========================================
+// CHILD COMPONENTS
+// ==========================================
 
-// 1. Üst Menü (Navbar)
 function Navbar({ user, setView, onLogout, activeView }) {
   return (
     <nav className="navbar">
-      <div className="logo" onClick={() => setView("home")} style={{cursor: 'pointer'}}>
-        ✨ BookMind
-      </div>
+      <div className="logo" onClick={() => setView("home")} style={{cursor: 'pointer'}}>✨ BookMind</div>
       <div className="nav-links">
-        <button 
-          className={activeView === 'home' ? 'active' : ''} 
-          onClick={() => setView("home")}
-        >
-          Ana Sayfa
+        <button className={activeView === 'home' ? 'active' : ''} onClick={() => setView("home")}>Home</button>
+        <button className={activeView === 'community' ? 'active' : ''} onClick={() => setView("community")}>Community</button>
+        <button className={activeView === 'profile' ? 'active' : ''} onClick={() => setView("profile")}>
+          @{user.username || "Profile"}
         </button>
-        <button 
-          className={activeView === 'profile' ? 'active' : ''} 
-          onClick={() => setView("profile")}
-        >
-          Profilim
-        </button>
-        <button className="logout-btn" onClick={onLogout}>Çıkış</button>
+        <button className="logout-btn" onClick={onLogout}>Logout</button>
       </div>
     </nav>
   );
 }
 
-// 2. Giriş / Kayıt Ekranı (AuthView)
 function AuthView({ onAuth }) {
   const [isLogin, setIsLogin] = useState(true);
-  const [email, setEmail] = useState("");
-  const [pass, setPass] = useState("");
-  const [name, setName] = useState("");
+  const [email, setEmail] = useState(""); 
+  const [pass, setPass] = useState(""); 
+  const [username, setUsername] = useState(""); 
 
   return (
     <div className="auth-container">
       <div className="auth-card">
-        {/* Logo ve Başlık */}
-        <div className="auth-brand">
-          ✨ BookMind
-        </div>
+        <div className="auth-brand">✨ BookMind</div>
+        <h2>{isLogin ? "Welcome Back" : "Create Account"}</h2>
+        <p className="subtitle">AI-powered personalized book recommendation system.</p>
         
-        <h2>{isLogin ? "Hoş Geldiniz" : "Hesap Oluştur"}</h2>
-        
-        {/* Proje Tanımı (Subtitle) */}
-        <p className="subtitle">
-          İlgi alanlarınıza ve okuma geçmişinize göre kişiselleştirilmiş, yapay zeka destekli kitap öneri sistemi.
-        </p>
+        <input className="input-field" placeholder="Username" onChange={e => setUsername(e.target.value)} />
         
         {!isLogin && (
-          <input 
-            className="input-field" 
-            placeholder="Ad Soyad" 
-            onChange={e => setName(e.target.value)} 
-          />
+          <input className="input-field" placeholder="Email (for contact)" onChange={e => setEmail(e.target.value)} />
         )}
-        <input 
-          className="input-field" 
-          placeholder="E-posta" 
-          onChange={e => setEmail(e.target.value)} 
-        />
-        <input 
-          className="input-field" 
-          type="password" 
-          placeholder="Şifre" 
-          onChange={e => setPass(e.target.value)} 
-        />
         
-        <button 
-          className="primary-btn" 
-          onClick={() => onAuth(isLogin ? "login" : "register", email, pass, name)}
-        >
-          {isLogin ? "Giriş Yap" : "Kayıt Ol"}
+        <input className="input-field" type="password" placeholder="Password" onChange={e => setPass(e.target.value)} />
+        
+        <button className="primary-btn" onClick={() => onAuth(isLogin ? "login" : "register", email, pass, username)}>
+          {isLogin ? "Login" : "Register"}
         </button>
-        
         <p className="toggle-text" onClick={() => setIsLogin(!isLogin)}>
-          {isLogin ? "Hesabın yok mu? Kayıt Ol" : "Zaten hesabın var mı? Giriş Yap"}
+          {isLogin ? "No account? Register here" : "Have an account? Login here"}
         </p>
       </div>
     </div>
   );
 }
 
-// Yıldız Bileşeni (Fare hareketlerini doğru algılar)
-function StarRating({ onRate }) {
-  const [hover, setHover] = useState(0); // Fare hangi yıldızın üzerinde?
-
-  return (
-    <div className="star-rating" onMouseLeave={() => setHover(0)}>
-      {[1, 2, 3, 4, 5].map((star) => (
-        <span
-          key={star}
-          className="star"
-          // Eğer yıldızın numarası, fareyle gelinen numaradan küçük veya eşitse SARI yap
-          style={{ color: star <= hover ? "#f1c40f" : "#bdc3c7" }}
-          onMouseEnter={() => setHover(star)}
-          onClick={() => onRate(star)}
-          title={`${star} Puan Ver`}
-        >
-          ★
-        </span>
-      ))}
-    </div>
-  );
-}
-// 3. Ana Sayfa (HomeView) - Arama ve Öneriler
-function HomeView({ user }) {
+function HomeView({ user, onBookClick }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [recs, setRecs] = useState([]);
   const [loading, setLoading] = useState(false);
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedBook, setSelectedBook] = useState(null);
+  const [selectedRating, setSelectedRating] = useState(0);
 
-  // Kitap Arama (UC-4)
+  const getRecs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/books/users/${user.uid}/recommendations`);
+      const data = await res.json();
+      setRecs(data);
+    } catch (e) {}
+    setLoading(false);
+  }, [user.uid]);
+
+  useEffect(() => { getRecs(); }, [getRecs]); 
+
   const searchBooks = async () => {
     if (!query) return;
     setLoading(true);
-    const res = await fetch(`${API_URL}/books/search?query=${query}`);
-    const data = await res.json();
-    setResults(data);
+    try {
+      const res = await fetch(`${API_URL}/books/search?query=${query}`);
+      const data = await res.json();
+      setResults(data);
+    } catch (e) {}
     setLoading(false);
   };
 
-  // GÜNCELLENDİ: Puan Verme (UC-2) - Artık puanı (score) parametre olarak alıyor
-  const rateBook = async (book, score) => {
+  const handleStarClick = (book, score) => {
+    setSelectedBook(book);
+    setSelectedRating(score);
+    setIsModalOpen(true);
+  };
+
+  const submitReview = async (newScore, reviewText) => {
+    if (newScore === 0) {
+      alert("Please select a rating.");
+      return;
+    }
     try {
-      await fetch(`${API_URL}/books/${book.book_id}/rate`, {
+      await fetch(`${API_URL}/books/${selectedBook.book_id}/rate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
-          user_id: user.uid, 
-          rating: score,  // Tıklanan yıldız değeri buraya geliyor
-          book_title: book.title,
-          review: "" // İstersen buraya inceleme metni de ekletebiliriz
+          user_id: user.uid,
+          rating: newScore,
+          book_title: selectedBook.title, 
+          review: reviewText,
+          display_name: user.username
         })
       });
-      alert(`"${book.title}" için ${score} yıldız kaydedildi! ⭐`);
-    } catch (error) {
-      alert("Puanlama sırasında hata oluştu.");
-    }
-  };
-
-  // Öneri Getirme (UC-3)
-  const getRecs = async () => {
-    setLoading(true);
-    const res = await fetch(`${API_URL}/books/users/${user.uid}/recommendations`);
-    const data = await res.json();
-    setRecs(data);
-    setLoading(false);
-  };
-
-  // Yıldızları Oluşturan Yardımcı Fonksiyon
-  const renderStars = (book) => {
-    return (
-      <div className="star-rating">
-        {[1, 2, 3, 4, 5].map((star) => (
-          <span
-            key={star}
-            className="star"
-            onClick={() => rateBook(book, star)}
-            title={`${star} Puan Ver`}
-          >
-            ★
-          </span>
-        ))}
-      </div>
-    );
+      alert("Review saved!");
+      setIsModalOpen(false);
+      getRecs(); 
+    } catch (error) { alert("Error occurred."); }
   };
 
   return (
     <div className="view-container">
+      <ReviewModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSubmit={submitReview} 
+        bookTitle={selectedBook?.title} 
+        initialScore={selectedRating} 
+      />
+
       <div className="hero-section">
-        <h1>Merhaba, {user.display_name || "Okur"}! 👋</h1>
-        <p>Bugün ne keşfetmek istersin?</p>
-        
+        <h1>Hello, {user.username || "Reader"}! 👋</h1>
         <div className="search-bar">
           <input 
-            placeholder="Kitap adı veya yazar ara... (Örn: Harry Potter)" 
+            placeholder="Search by title or author..." 
             onChange={e => setQuery(e.target.value)} 
-            onKeyPress={e => e.key === 'Enter' && searchBooks()}
+            onKeyPress={e => e.key === 'Enter' && searchBooks()} 
           />
-          <button onClick={searchBooks}>🔍 Ara</button>
+          <button onClick={searchBooks}>🔍</button>
         </div>
       </div>
 
       <div className="content-grid">
-        {/* Sol Panel: Arama Sonuçları */}
+        {/* Search Results */}
         <div className="card-panel">
-          <h3>🔍 Arama Sonuçları</h3>
-          {results.length === 0 && !loading && <p className="empty-text">Arama yapmak için yukarıyı kullanın.</p>}
-          
+          <h3>🔍 Search Results</h3>
+          {results.length === 0 && !loading && <p className="empty-text">Start searching above...</p>}
           <div className="book-list">
             {results.map(b => (
               <div key={b.book_id} className="book-item">
                 <img 
-                  src={b.image_url && b.image_url.length > 5 ? b.image_url : "https://via.placeholder.com/50x75?text=No+Img"} 
-                  alt={b.title} 
-                  className="book-cover-img" 
+                  src={b.image_url && b.image_url.length > 5 ? b.image_url : "https://via.placeholder.com/50x75"} 
+                  alt="cover" 
+                  className="book-cover-img"
+                  onClick={() => onBookClick(b.book_id)}
+                  style={{cursor: 'pointer'}}
                 />
-                
                 <div className="book-info">
-                  <strong>{b.title}</strong>
+                  <strong onClick={() => onBookClick(b.book_id)} style={{cursor: 'pointer'}}>
+                    {b.title}
+                  </strong>
                   <span>{b.author}</span>
-                  <span style={{fontSize: '0.8rem', color: '#888'}}>{b.year}</span>
-                  
                   <div style={{marginTop: '5px'}}>
-                    <span style={{fontSize:'0.8rem', color:'#555', marginRight:'5px'}}>Puanla:</span>
-                    {/* Yeni Bileşeni Burada Kullanıyoruz */}
-                    <StarRating onRate={(score) => rateBook(b, score)} />
+                    <StarRating onRate={(score) => handleStarClick(b, score)} />
                   </div>
                 </div>
               </div>
@@ -268,29 +295,30 @@ function HomeView({ user }) {
           </div>
         </div>
 
-        {/* Sağ Panel: Öneriler */}
+        {/* Recommendations */}
         <div className="card-panel">
-          <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'15px'}}>
-            <h3>✨ Sana Özel Öneriler</h3>
-            <button className="secondary-btn" onClick={getRecs}>Yenile ↻</button>
+          <div style={{display:'flex', justifyContent:'space-between'}}>
+            <h3>✨ Recommendations</h3>
+            <button className="secondary-btn" onClick={getRecs}>Refresh</button>
           </div>
-          
-          {recs.length === 0 && !loading && <p className="empty-text">Öneri almak için sol taraftan kitapları puanlayın.</p>}
-
           <div className="book-list">
-            {recs.map((b, i) => (
-              <div key={i} className="book-item recommend-item">
+             {recs.map((b, i) => (
+               <div key={i} className="book-item">
                  <img 
-                  src={b.image_url && b.image_url.length > 5 ? b.image_url : "https://via.placeholder.com/50x75?text=No+Img"} 
-                  alt={b.title} 
-                  className="book-cover-img" 
-                />
-                <div className="book-info">
-                  <strong>{b.title}</strong>
-                  <span>{b.author}</span>
-                </div>
-              </div>
-            ))}
+                   src={b.image_url} 
+                   className="book-cover-img" 
+                   alt="" 
+                   onClick={() => onBookClick(b.book_id)}
+                   style={{cursor: 'pointer'}}
+                 />
+                 <div className="book-info">
+                   <strong onClick={() => onBookClick(b.book_id)} style={{cursor: 'pointer'}}>
+                     {b.title}
+                   </strong>
+                   <span>{b.author}</span>
+                 </div>
+               </div>
+             ))}
           </div>
         </div>
       </div>
@@ -298,59 +326,422 @@ function HomeView({ user }) {
   );
 }
 
-// 4. Profil Sayfası (ProfileView)
-function ProfileView({ user }) {
+function ProfileView({ user, onBookClick }) {
   const [ratings, setRatings] = useState([]);
+  const [recs, setRecs] = useState([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState(null); 
 
-  useEffect(() => {
-    async function fetchRatings() {
-      try {
-        const res = await fetch(`${API_URL}/books/users/${user.uid}/ratings`);
-        const data = await res.json();
-        setRatings(data);
-      } catch (e) { console.error("Ratingler çekilemedi"); }
-    }
-    fetchRatings();
-  }, [user.uid]);
+  const fetchUserData = () => {
+    fetch(`${API_URL}/books/users/${user.uid}/ratings`).then(r => r.json()).then(setRatings);
+    fetch(`${API_URL}/books/users/${user.uid}/recommendations`).then(r => r.json()).then(setRecs);
+  };
+
+  useEffect(() => { fetchUserData(); }, [user.uid]);
+
+  const handleEditClick = (ratingItem) => {
+    setEditingItem(ratingItem);
+    setIsModalOpen(true);
+  };
+
+  const submitEdit = async (newScore, newText) => {
+    if (!editingItem) return;
+    await fetch(`${API_URL}/books/${editingItem.book_id}/rate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        user_id: user.uid, rating: newScore, book_title: editingItem.book_title, 
+        review: newText, display_name: user.username 
+      })
+    });
+    alert("Updated successfully!");
+    setIsModalOpen(false);
+    setEditingItem(null);
+    fetchUserData();
+  };
 
   return (
     <div className="view-container">
+      {editingItem && (
+        <ReviewModal 
+          isOpen={isModalOpen} 
+          onClose={() => setIsModalOpen(false)} 
+          onSubmit={submitEdit} 
+          bookTitle={editingItem.book_title} 
+          initialScore={editingItem.rating}
+          initialText={editingItem.review}
+        />
+      )}
+
       <div className="profile-header">
-        <div className="avatar">
-          {user.display_name ? user.display_name[0].toUpperCase() : "U"}
-        </div>
-        <h2>{user.display_name || user.email}</h2>
+        <div className="avatar">{user.username?.[0]?.toUpperCase()}</div>
+        <h2>@{user.username}</h2>
         <p>{user.email}</p>
       </div>
 
-      <div className="card-panel full-width">
-        <h3>📚 Okuma Geçmişim ve Puanlarım</h3>
-        {ratings.length === 0 ? (
-          <p className="empty-text">Henüz hiç kitap puanlamadınız. Ana sayfaya gidip kitap arayabilirsiniz.</p>
+      <div className="card-panel full-width" style={{marginBottom: '25px'}}>
+        <h3>✨ Top Picks for You</h3>
+        {recs.length === 0 ? (
+          <p className="empty-text">Generating recommendations...</p>
         ) : (
-          <table className="ratings-table">
-            <thead>
-              <tr>
-                <th>Kitap Adı</th>
-                <th>Puan</th>
-                <th>İnceleme</th>
-                <th>Tarih</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ratings.map((r, i) => (
-                <tr key={i}>
-                  <td style={{fontWeight:'500'}}>{r.book_title}</td>
-                  <td style={{color:'#f1c40f'}}>{'★'.repeat(r.rating)}</td>
-                  <td>{r.review || "-"}</td>
-                  <td style={{color:'#777', fontSize:'0.9rem'}}>
-                    {r.timestamp ? new Date(r.timestamp).toLocaleDateString() : "Bugün"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="profile-recs-grid">
+            {recs.slice(0, 5).map((b, i) => (
+              <div key={i} className="mini-book-card" title={b.title} onClick={() => onBookClick(b.book_id)}>
+                <img src={b.image_url && b.image_url.length > 5 ? b.image_url : "https://via.placeholder.com/100x150"} alt={b.title} />
+                <div className="mini-book-title">{b.title}</div>
+              </div>
+            ))}
+          </div>
         )}
+      </div>
+
+      <div className="card-panel full-width">
+        <h3>📚 Reading History</h3>
+        <RatingsTable ratings={ratings} onBookClick={onBookClick} onEdit={handleEditClick} />
+      </div>
+    </div>
+  );
+}
+
+function CommunityView({ onUserClick, onBookClick }) {
+  const [recentRatings, setRecentRatings] = useState([]);
+  
+  useEffect(() => { 
+    fetch(`${API_URL}/books/ratings/recent`).then(res => res.json()).then(setRecentRatings); 
+  }, []);
+
+  return (
+    <div className="view-container">
+      <div className="card-panel full-width">
+        <h3>👥 Community Feed</h3>
+        <div className="community-feed">
+          {recentRatings.map((r, i) => {
+            const myId = window.currentUser?.uid;
+            const isLiked = (r.liked_by || []).includes(myId);
+            
+            return (
+              <div key={i} className="feed-item">
+                <div className="feed-avatar" onClick={() => onUserClick(r.user_id)}>
+                  {r.display_name ? r.display_name[0].toUpperCase() : "?"}
+                </div>
+                <div className="feed-content">
+                  <div className="feed-header">
+                    <strong className="feed-user" onClick={() => onUserClick(r.user_id)}>@{r.display_name || "Anonim"}</strong>
+                    <span> reviewed a book:</span>
+                  </div>
+                  
+                  <div className="feed-book-title" onClick={() => onBookClick(r.book_id)} style={{cursor:'pointer', color:'#2980b9', display:'inline-block'}}>
+                    {r.book_title}
+                  </div>
+
+                  <div className="feed-stars" style={{color:'#f1c40f'}}>{"★".repeat(r.rating)}</div>
+                  {r.review && <div className="feed-review">"{r.review}"</div>}
+                  
+                  <div className="feed-footer" style={{display:'flex', justifyContent:'space-between', marginTop:'10px', alignItems:'center'}}>
+                    <div className={`like-btn ${isLiked ? 'liked' : ''}`} onClick={async () => {
+                       const newRatings = [...recentRatings];
+                       const likes = newRatings[i].liked_by || [];
+                       if (likes.includes(myId)) newRatings[i].liked_by = likes.filter(id => id !== myId);
+                       else newRatings[i].liked_by = [...likes, myId];
+                       setRecentRatings(newRatings);
+                       await toggleLike(r.id, myId);
+                    }}>
+                      {isLiked ? "❤️" : "🤍"} {(r.liked_by || []).length} Likes
+                    </div>
+                    <div className="feed-date">{r.timestamp ? new Date(r.timestamp).toLocaleDateString() : ""}</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PublicProfileView({ targetUserId, onBack, onBookClick }) {
+  const [targetUser, setTargetUser] = useState(null);
+  const [ratings, setRatings] = useState([]);
+
+  useEffect(() => {
+    fetch(`${API_URL}/auth/user/${targetUserId}`).then(res => res.json()).then(setTargetUser);
+    fetch(`${API_URL}/books/users/${targetUserId}/ratings`).then(res => res.json()).then(setRatings);
+  }, [targetUserId]);
+
+  if (!targetUser) return <div className="view-container">Loading...</div>;
+
+  return (
+    <div className="view-container">
+      <button className="secondary-btn" onClick={onBack} style={{marginBottom:'20px'}}>← Back</button>
+      <div className="profile-header">
+        <div className="avatar" style={{background: '#9b59b6'}}>{targetUser.username?.[0]?.toUpperCase()}</div>
+        <h2>@{targetUser.username}</h2>
+        <p>BookMind Reader</p>
+      </div>
+      <div className="card-panel full-width"><h3>📚 Library of @{targetUser.username}</h3><RatingsTable ratings={ratings} onBookClick={onBookClick} /></div>
+    </div>
+  );
+}
+
+function BookDetailView({ bookId, user, onBack }) {
+  const [book, setBook] = useState(null);
+  const [reviews, setReviews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  
+  const [selectedRating, setSelectedRating] = useState(0); 
+  const [myReviewText, setMyReviewText] = useState(""); 
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const detailsRes = await fetch(`${API_URL}/books/${bookId}/details`);
+      const detailsData = await detailsRes.json();
+      setBook(detailsData);
+
+      const reviewsRes = await fetch(`${API_URL}/books/${bookId}/reviews`);
+      const reviewsData = await reviewsRes.json();
+      setReviews(reviewsData);
+
+      const myReview = reviewsData.find(r => r.user_id === user.uid);
+      if (myReview) {
+        setSelectedRating(myReview.rating);
+        setMyReviewText(myReview.review || "");
+      } else {
+        setSelectedRating(0);
+        setMyReviewText("");
+      }
+    } catch (e) { console.error("Error", e); }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchData(); }, [bookId, user.uid]);
+
+  const handleRateClick = (score) => {
+    setSelectedRating(score);
+    setIsModalOpen(true);
+  };
+
+  const submitReview = async (newScore, newText) => {
+    if (newScore === 0) { alert("Please select a rating."); return; }
+
+    await fetch(`${API_URL}/books/${bookId}/rate`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        user_id: user.uid, rating: newScore, book_title: book.title, 
+        review: newText, display_name: user.username 
+      })
+    });
+    alert("Review Saved!");
+    setIsModalOpen(false);
+    fetchData(); 
+  };
+
+  if (loading) return <div className="view-container">Loading...</div>;
+  if (!book) return <div className="view-container">Book not found.</div>;
+
+  const avgRating = reviews.length > 0 
+    ? (reviews.reduce((acc, curr) => acc + curr.rating, 0) / reviews.length).toFixed(1) 
+    : "N/A";
+
+  return (
+    <div className="view-container">
+      <button className="secondary-btn" onClick={onBack} style={{marginBottom:'20px'}}>← Back</button>
+      
+      <ReviewModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        onSubmit={submitReview} 
+        bookTitle={book.title} 
+        initialScore={selectedRating} 
+        initialText={myReviewText} 
+      />
+
+      <div className="book-detail-layout">
+        <div className="detail-left">
+          <img src={book.image_url} alt={book.title} className="detail-cover" />
+          <div className="detail-actions">
+            <div style={{marginBottom:'15px', fontSize:'1.2rem', fontWeight:'bold'}}>
+              Average Rating: ⭐ {avgRating}
+            </div>
+            
+            <div style={{background: '#f9f9f9', padding: '15px', borderRadius: '8px', border: '1px solid #eee'}}>
+              <p style={{margin: '0 0 10px 0', color: '#555', fontWeight:'bold'}}>Your Rating:</p>
+              
+              {selectedRating > 0 ? (
+                <div style={{textAlign: 'center'}}>
+                  <div style={{fontSize: '1.8rem', color: '#f1c40f', marginBottom: '10px'}}>
+                    {"★".repeat(selectedRating)}
+                  </div>
+                  {myReviewText && <div style={{fontSize:'0.9rem', fontStyle:'italic', color:'#555', marginBottom: '10px'}}>"{myReviewText}"</div>}
+                  <button 
+                    style={{background: 'none', border: '1px solid #3498db', color: '#3498db', padding: '5px 10px', borderRadius: '15px', cursor: 'pointer', fontSize: '0.8rem'}}
+                    onClick={() => setIsModalOpen(true)}
+                  >
+                    ✏️ Edit
+                  </button>
+                </div>
+              ) : (
+                <StarRating onRate={handleRateClick} />
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="detail-right">
+          <h1 className="detail-title">{book.title}</h1>
+          <h3 className="detail-author">Author: {book.author}</h3>
+          <div className="detail-meta">
+            <p><strong>Publisher:</strong> {book.publisher}</p>
+            <p><strong>Year:</strong> {book.year}</p>
+            <p><strong>ISBN:</strong> {book.book_id}</p>
+          </div>
+          <hr className="divider" />
+          <h3>💬 Community Reviews ({reviews.length})</h3>
+          <div className="reviews-list">
+            {reviews.length === 0 ? <p>No reviews yet.</p> : null}
+            {reviews.map((r, i) => {
+               const myId = window.currentUser?.uid;
+               const isLiked = (r.liked_by || []).includes(myId);
+               return (
+                <div key={i} className="review-card">
+                  <div className="review-header">
+                    <strong>@{r.display_name || "Anonim"}</strong>
+                    <span className="review-date">{r.timestamp ? new Date(r.timestamp).toLocaleDateString() : ""}</span>
+                  </div>
+                  <div className="review-stars">{'★'.repeat(r.rating)}</div>
+                  <p className="review-text">{r.review}</p>
+                  <div 
+                    className="review-actions" 
+                    style={{marginTop:'10px', cursor:'pointer', fontSize:'0.9rem', color: isLiked ? '#e74c3c' : '#777'}}
+                    onClick={async () => {
+                       const newReviews = [...reviews];
+                       const likes = newReviews[i].liked_by || [];
+                       if (likes.includes(myId)) newReviews[i].liked_by = likes.filter(id => id !== myId);
+                       else newReviews[i].liked_by = [...likes, myId];
+                       setReviews(newReviews);
+                       await toggleLike(r.id, myId);
+                    }}
+                  >
+                     {isLiked ? "❤️" : "🤍"} {(r.liked_by || []).length}
+                  </div>
+                </div>
+               );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// HELPERS
+// ==========================================
+
+function RatingsTable({ ratings, onBookClick, onEdit }) {
+  if (ratings.length === 0) return <p className="empty-text">No books rated yet.</p>;
+  return (
+    <table className="ratings-table">
+      <thead>
+        <tr>
+          <th style={{width: '60px'}}>Cover</th>
+          <th>Book</th>
+          <th>Rating</th>
+          <th>Review</th>
+          <th>Date</th>
+          {onEdit && <th>Action</th>}
+        </tr>
+      </thead>
+      <tbody>
+        {ratings.map((r, i) => (
+          <tr key={i}>
+            <td>
+              <img 
+                src={r.image_url && r.image_url.length > 5 ? r.image_url : "https://via.placeholder.com/40x60"} 
+                alt="cover"
+                style={{width: '40px', height: '60px', objectFit: 'cover', borderRadius: '4px', cursor: 'pointer'}}
+                onClick={() => onBookClick(r.book_id)}
+              />
+            </td>
+            <td 
+              onClick={() => onBookClick(r.book_id)}
+              style={{fontWeight: '600', color: '#2c3e50', cursor: 'pointer', textDecoration: 'underline', textDecorationColor: '#bdc3c7'}}
+            >
+              {r.book_title}
+            </td>
+            <td style={{color:'#f1c40f'}}>{'★'.repeat(r.rating)}</td>
+            <td style={{color: '#555', fontStyle: 'italic', fontSize:'0.9rem'}}>
+              {r.review ? (r.review.length > 40 ? r.review.substring(0, 40) + "..." : r.review) : "-"}
+            </td>
+            <td style={{color:'#777', fontSize:'0.8rem'}}>{r.timestamp ? new Date(r.timestamp).toLocaleDateString() : ""}</td>
+            {onEdit && (
+              <td>
+                <button onClick={() => onEdit(r)} style={{background: 'white', border: '1px solid #3498db', color: '#3498db', padding: '5px 10px', borderRadius: '5px', cursor: 'pointer', fontSize:'0.8rem'}}>✏️</button>
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function StarRating({ onRate, value = 0 }) {
+  const [hover, setHover] = useState(0);
+  return (
+    <div className="star-rating" onMouseLeave={() => setHover(0)}>
+      {[1, 2, 3, 4, 5].map((star) => {
+        const isActive = hover > 0 ? star <= hover : star <= value;
+        return (
+          <span
+            key={star}
+            className="star"
+            style={{ color: isActive ? "#f1c40f" : "#bdc3c7" }}
+            onMouseEnter={() => setHover(star)}
+            onClick={() => onRate(star)}
+            title={`${star} Stars`}
+          >
+            ★
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReviewModal({ isOpen, onClose, onSubmit, bookTitle, initialScore = 0, initialText = "" }) {
+  const [score, setScore] = useState(initialScore);
+  const [text, setText] = useState(initialText);
+
+  useEffect(() => {
+    if (isOpen) {
+      setScore(initialScore);
+      setText(initialText || "");
+    }
+  }, [isOpen, initialScore, initialText]);
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal-content">
+        <h3>"{bookTitle}"</h3>
+        <div style={{marginBottom: '15px'}}>
+          <p style={{marginBottom:'5px', color:'#666', fontSize:'0.9rem'}}>Your Rating:</p>
+          <StarRating onRate={setScore} value={score} />
+        </div>
+        <textarea 
+          className="review-textarea" 
+          placeholder="Write your review here... (Optional)"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <div className="modal-actions">
+          <button className="cancel-btn" onClick={onClose}>Cancel</button>
+          <button className="submit-btn" onClick={() => onSubmit(score, text)}>Save</button>
+        </div>
       </div>
     </div>
   );
