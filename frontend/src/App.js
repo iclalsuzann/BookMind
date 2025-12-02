@@ -28,13 +28,59 @@ function App() {
   const [view, setView] = useState(user ? "home" : "auth"); 
   const [targetUserId, setTargetUserId] = useState(null);
   const [activeBookId, setActiveBookId] = useState(null);
+  const [notification, setNotification] = useState({ show: false, message: '', type: 'success' });
 
   // Expose user globally for helper components
   window.currentUser = user; 
 
+  // --- Notification Handler ---
+  const showNotification = (message, type = 'success') => {
+    setNotification({ show: true, message, type });
+    setTimeout(() => setNotification({ show: false, message: '', type: 'success' }), 3500);
+  };
+
+  // --- Session Timeout Handler ---
+  useEffect(() => {
+    if (!user) return;
+
+    const TIMEOUT_DURATION = 30 * 60 * 1000; // 30 dakika
+    let timeoutId;
+
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      localStorage.setItem('lastActivity', Date.now().toString());
+      timeoutId = setTimeout(() => {
+        showNotification("Session expired due to inactivity.", "warning");
+        handleLogout();
+      }, TIMEOUT_DURATION);
+    };
+
+    // Kullanıcı aktivitelerini dinle
+    const events = ['mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    events.forEach(event => window.addEventListener(event, resetTimer));
+
+    // Sayfa yüklendiğinde son aktiviteyi kontrol et
+    const lastActivity = localStorage.getItem('lastActivity');
+    if (lastActivity) {
+      const timeSinceLastActivity = Date.now() - parseInt(lastActivity);
+      if (timeSinceLastActivity > TIMEOUT_DURATION) {
+        showNotification("Session expired due to inactivity.", "warning");
+        handleLogout();
+        return;
+      }
+    }
+
+    resetTimer();
+
+    return () => {
+      clearTimeout(timeoutId);
+      events.forEach(event => window.removeEventListener(event, resetTimer));
+    };
+  }, [user]);
+
   // --- Authentication Handlers ---
 
-  const handleAuth = async (type, email, password, username) => {
+  const handleAuth = async (type, email, password, username, switchToLogin) => {
     const endpoint = type === "login" ? "login" : "register";
     try {
       const res = await fetch(`${API_URL}/auth/${endpoint}`, {
@@ -50,7 +96,8 @@ function App() {
       
       if (res.ok) {
         if (type === "register") {
-          alert("Registration Successful! Please Login."); 
+          showNotification("Registration Successful! Please Login.", "success");
+          switchToLogin();
           return;
         }
         
@@ -62,18 +109,19 @@ function App() {
         setUser(data);
         setView("home");
       } else {
-        alert(data.error || "Operation failed.");
+        showNotification(data.error || "Operation failed.", "error");
       }
-    } catch (err) { alert("Server connection error."); }
+    } catch (err) { showNotification("Server connection error.", "error"); }
   };
 
-  const handleLogout = () => { 
+  const handleLogout = useCallback(() => { 
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('lastActivity');
     setToken(null); 
     setUser(null); 
     setView("auth"); 
-  };
+  }, []);
 
   // --- Navigation Handlers ---
 
@@ -94,14 +142,15 @@ function App() {
   // --- Main Render ---
   return (
     <div className="App">
+      {notification.show && <Notification message={notification.message} type={notification.type} />}
       {user && <Navbar user={user} setView={setView} onLogout={handleLogout} activeView={view} />}
       
       <div className="main-content">
         {view === "auth" && <AuthView onAuth={handleAuth} />}
         
-        {view === "home" && <HomeView user={user} onBookClick={goToBookDetail} />}
+        {view === "home" && <HomeView user={user} onBookClick={goToBookDetail} showNotification={showNotification} />}
         
-        {view === "profile" && <ProfileView user={user} onBookClick={goToBookDetail} />}
+        {view === "profile" && <ProfileView user={user} onBookClick={goToBookDetail} showNotification={showNotification} />}
         
         {view === "community" && (
           <CommunityView 
@@ -123,6 +172,7 @@ function App() {
             bookId={activeBookId} 
             user={user} 
             onBack={() => setView("home")} 
+            showNotification={showNotification}
           />
         )}
       </div>
@@ -171,7 +221,7 @@ function AuthView({ onAuth }) {
         
         <input className="input-field" type="password" placeholder="Password" onChange={e => setPass(e.target.value)} />
         
-        <button className="primary-btn" onClick={() => onAuth(isLogin ? "login" : "register", email, pass, username)}>
+        <button className="primary-btn" onClick={() => onAuth(isLogin ? "login" : "register", email, pass, username, () => setIsLogin(true))}>
           {isLogin ? "Login" : "Register"}
         </button>
         <p className="toggle-text" onClick={() => setIsLogin(!isLogin)}>
@@ -182,7 +232,7 @@ function AuthView({ onAuth }) {
   );
 }
 
-function HomeView({ user, onBookClick }) {
+function HomeView({ user, onBookClick, showNotification }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [recs, setRecs] = useState([]);
@@ -223,7 +273,7 @@ function HomeView({ user, onBookClick }) {
 
   const submitReview = async (newScore, reviewText) => {
     if (newScore === 0) {
-      alert("Please select a rating.");
+      showNotification("Please select a rating.", "warning");
       return;
     }
     try {
@@ -238,10 +288,10 @@ function HomeView({ user, onBookClick }) {
           display_name: user.username
         })
       });
-      alert("Review saved!");
+      showNotification("Review saved!", "success");
       setIsModalOpen(false);
       getRecs(); 
-    } catch (error) { alert("Error occurred."); }
+    } catch (error) { showNotification("Error occurred.", "error"); }
   };
 
   return (
@@ -272,9 +322,9 @@ function HomeView({ user, onBookClick }) {
           <h3>🔍 Search Results</h3>
           {results.length === 0 && !loading && <p className="empty-text">Start searching above...</p>}
           <div className="book-list">
-            {results.map(b => (
-              <div key={b.book_id} className="book-item">
-                <img 
+            {results.map((b, i) => (
+               <div key={i} className="book-item">
+                 <img 
                   src={b.image_url && b.image_url.length > 5 ? b.image_url : "https://via.placeholder.com/50x75"} 
                   alt="cover" 
                   className="book-cover-img"
@@ -326,7 +376,7 @@ function HomeView({ user, onBookClick }) {
   );
 }
 
-function ProfileView({ user, onBookClick }) {
+function ProfileView({ user, onBookClick, showNotification }) {
   const [ratings, setRatings] = useState([]);
   const [recs, setRecs] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -354,7 +404,7 @@ function ProfileView({ user, onBookClick }) {
         review: newText, display_name: user.username 
       })
     });
-    alert("Updated successfully!");
+    showNotification("Updated successfully!", "success");
     setIsModalOpen(false);
     setEditingItem(null);
     fetchUserData();
@@ -484,7 +534,7 @@ function PublicProfileView({ targetUserId, onBack, onBookClick }) {
   );
 }
 
-function BookDetailView({ bookId, user, onBack }) {
+function BookDetailView({ bookId, user, onBack, showNotification }) {
   const [book, setBook] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -524,7 +574,7 @@ function BookDetailView({ bookId, user, onBack }) {
   };
 
   const submitReview = async (newScore, newText) => {
-    if (newScore === 0) { alert("Please select a rating."); return; }
+    if (newScore === 0) { showNotification("Please select a rating.", "warning"); return; }
 
     await fetch(`${API_URL}/books/${bookId}/rate`, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -533,7 +583,7 @@ function BookDetailView({ bookId, user, onBack }) {
         review: newText, display_name: user.username 
       })
     });
-    alert("Review Saved!");
+    showNotification("Review Saved!", "success");
     setIsModalOpen(false);
     fetchData(); 
   };
@@ -659,7 +709,7 @@ function RatingsTable({ ratings, onBookClick, onEdit }) {
           <tr key={i}>
             <td>
               <img 
-                src={r.image_url && r.image_url.length > 5 ? r.image_url : "https://via.placeholder.com/40x60"} 
+                src={r.image_url && r.image_url.length > 5 ? r.image_url : "https://images.unsplash.com/photo-1543002588-bfa74002ed7e?w=40&h=60&fit=crop"} 
                 alt="cover"
                 style={{width: '40px', height: '60px', objectFit: 'cover', borderRadius: '4px', cursor: 'pointer'}}
                 onClick={() => onBookClick(r.book_id)}
@@ -743,6 +793,21 @@ function ReviewModal({ isOpen, onClose, onSubmit, bookTitle, initialScore = 0, i
           <button className="submit-btn" onClick={() => onSubmit(score, text)}>Save</button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Notification({ message, type }) {
+  const icons = {
+    success: '✓',
+    error: '✕',
+    warning: '⚠'
+  };
+
+  return (
+    <div className={`notification notification-${type}`}>
+      <span className="notification-icon">{icons[type]}</span>
+      <span className="notification-message">{message}</span>
     </div>
   );
 }

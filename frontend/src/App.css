@@ -586,75 +586,212 @@ body {
   font-weight: bold;
 }
 
-/* Modal */
+/* Modal - Modern Design */
 .modal-overlay {
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: 1000;
-  animation: fadeIn 0.3s;
+  animation: fadeIn 0.25s ease-out;
 }
 
 .modal-content {
   background: white;
-  padding: 30px;
-  border-radius: 12px;
+  padding: 40px;
+  border-radius: 20px;
   width: 90%;
-  max-width: 500px;
-  box-shadow: 0 15px 30px rgba(0,0,0,0.3);
+  max-width: 520px;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25), 
+              0 10px 20px rgba(0, 0, 0, 0.15);
   text-align: center;
+  animation: modalSlideIn 0.3s ease-out;
+  transform-origin: center;
 }
 
 .modal-content h3 {
   margin-top: 0;
+  margin-bottom: 25px;
   color: #2c3e50;
-  font-size: 1.5rem;
+  font-size: 1.6rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
 }
 
 .review-textarea {
   width: 100%;
-  height: 120px;
-  margin: 15px 0;
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  height: 130px;
+  margin: 20px 0;
+  padding: 15px;
+  border: 2px solid #e8ecef;
+  border-radius: 12px;
   font-family: inherit;
   font-size: 1rem;
   resize: vertical;
   box-sizing: border-box;
+  transition: all 0.3s ease;
+  background: #f8f9fa;
+}
+
+.review-textarea:focus {
+  outline: none;
+  border-color: #3498db;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
 }
 
 .modal-actions {
   display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  margin-top: 10px;
+  justify-content: center;
+  gap: 15px;
+  margin-top: 25px;
+}
+
+.cancel-btn, .submit-btn {
+  border: none;
+  padding: 12px 28px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .cancel-btn {
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: bold;
+  background: #f1f3f5;
+  color: #495057;
+}
+
+.cancel-btn:hover {
+  background: #e9ecef;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .submit-btn {
-  background: #27ae60;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: bold;
+}
+
+.submit-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+}
+
+.submit-btn:active, .cancel-btn:active {
+  transform: translateY(0);
 }
 
 @keyframes fadeIn {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from { 
+    opacity: 0; 
+  }
+  to { 
+    opacity: 1; 
+  }
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* =========================================
+   MODERN NOTIFICATION SYSTEM
+   ========================================= */
+.notification {
+  position: fixed;
+  top: 30px;
+  right: 30px;
+  padding: 18px 28px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  z-index: 10000;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2),
+              0 5px 15px rgba(0, 0, 0, 0.15);
+  animation: slideInRight 0.4s ease-out, fadeOut 0.5s ease-in 3s forwards;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  max-width: 400px;
+}
+
+.notification-icon {
+  font-size: 1.3rem;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.notification-message {
+  flex: 1;
+}
+
+.notification-success {
+  background: linear-gradient(135deg, rgba(46, 213, 115, 0.95) 0%, rgba(39, 174, 96, 0.95) 100%);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.notification-success .notification-icon {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.notification-error {
+  background: linear-gradient(135deg, rgba(235, 77, 75, 0.95) 0%, rgba(214, 48, 49, 0.95) 100%);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.notification-error .notification-icon {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.notification-warning {
+  background: linear-gradient(135deg, rgba(250, 177, 160, 0.95) 0%, rgba(245, 124, 0, 0.95) 100%);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+}
+
+.notification-warning .notification-icon {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(100px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
