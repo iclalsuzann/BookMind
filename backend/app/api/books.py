@@ -228,6 +228,32 @@ def get_book_details(book_id):
     
     return jsonify(clean_info), 200
 
+# YENİ: Benzer Kitaplar Endpoint
+@books_bp.route('/<book_id>/similar', methods=['GET'])
+def get_similar_books(book_id):
+    """Belirli bir kitaba benzer kitapları döndürür"""
+    df = recommender_engine.books_data
+    
+    # Kitabı bul
+    book_row = df[df['book_id'].astype(str) == str(book_id)]
+    
+    if book_row.empty:
+        return jsonify({"error": "Kitap bulunamadı"}), 404
+    
+    # Kitap başlığını al
+    book_title = book_row.iloc[0]['title']
+    
+    # Öneri motorunu kullanarak benzer kitapları al
+    similar_books = recommender_engine.get_recommendations(book_title)
+    
+    # NaN değerlerini temizle
+    clean_books = []
+    for book in similar_books:
+        clean_book = {k: (v if pd.notna(v) else "Bilgi Yok") for k, v in book.items()}
+        clean_books.append(clean_book)
+    
+    return jsonify(clean_books), 200
+
 # YENİ: Yorumu Beğen / Beğenmekten Vazgeç (Toggle Like)
 @books_bp.route('/ratings/<rating_id>/like', methods=['POST'])
 def like_rating(rating_id):

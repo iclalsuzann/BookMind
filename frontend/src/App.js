@@ -119,12 +119,22 @@ function App() {
           return;
         }
         
+        // Kullanıcı detaylarını takip bilgileriyle birlikte çek
+        const userDetailsRes = await fetch(`${API_URL}/auth/user/${data.uid}`);
+        const userDetails = await userDetailsRes.json();
+        
+        const fullUserData = {
+          ...data,
+          followers_count: userDetails.followers_count || 0,
+          following_count: userDetails.following_count || 0
+        };
+        
         // Persist session
         localStorage.setItem('token', data.token);
-        localStorage.setItem('user', JSON.stringify(data));
+        localStorage.setItem('user', JSON.stringify(fullUserData));
 
         setToken(data.token);
-        setUser(data);
+        setUser(fullUserData);
         setView("home");
       } else {
         showNotification(data.error || "Operation failed.", "error");
@@ -191,6 +201,7 @@ function App() {
             user={user} 
             onBack={() => setView("home")} 
             showNotification={showNotification}
+            onBookClick={goToBookDetail}
           />
         )}
       </div>
@@ -471,6 +482,11 @@ function ProfileView({ user, onBookClick, showNotification }) {
         <div className="avatar">{user.username?.[0]?.toUpperCase()}</div>
         <h2>@{user.username}</h2>
         <p>{user.email}</p>
+        
+        <div style={{display: 'flex', gap: '20px', justifyContent: 'center', margin: '15px 0', fontSize: '0.9rem', color: '#666'}}>
+          <span><strong>{user.followers_count || 0}</strong> Takipçi</span>
+          <span><strong>{user.following_count || 0}</strong> Takip</span>
+        </div>
       </div>
 
       <div className="card-panel full-width" style={{marginBottom: '25px'}}>
@@ -557,11 +573,48 @@ function CommunityView({ onUserClick, onBookClick }) {
 function PublicProfileView({ targetUserId, onBack, onBookClick }) {
   const [targetUser, setTargetUser] = useState(null);
   const [ratings, setRatings] = useState([]);
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [followLoading, setFollowLoading] = useState(false);
+  
+  const currentUser = window.currentUser;
 
   useEffect(() => {
     fetch(`${API_URL}/auth/user/${targetUserId}`).then(res => res.json()).then(setTargetUser);
     fetch(`${API_URL}/books/users/${targetUserId}/ratings`).then(res => res.json()).then(setRatings);
-  }, [targetUserId]);
+    
+    // Takip durumunu kontrol et
+    if (currentUser) {
+      fetch(`${API_URL}/auth/is_following?follower_id=${currentUser.uid}&following_id=${targetUserId}`)
+        .then(res => res.json())
+        .then(data => setIsFollowing(data.is_following));
+    }
+  }, [targetUserId, currentUser]);
+
+  const handleFollowToggle = async () => {
+    if (!currentUser) return;
+    
+    setFollowLoading(true);
+    const endpoint = isFollowing ? '/auth/unfollow' : '/auth/follow';
+    
+    try {
+      await fetch(`${API_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          follower_id: currentUser.uid,
+          following_id: targetUserId
+        })
+      });
+      
+      setIsFollowing(!isFollowing);
+      
+      // Kullanıcı bilgilerini yenile (takipçi sayısı güncellensin)
+      fetch(`${API_URL}/auth/user/${targetUserId}`).then(res => res.json()).then(setTargetUser);
+    } catch (e) {
+      console.error('Takip işlemi başarısız:', e);
+    }
+    setFollowLoading(false);
+  };
 
   if (!targetUser) return <div className="view-container">Loading...</div>;
 
@@ -572,13 +625,29 @@ function PublicProfileView({ targetUserId, onBack, onBookClick }) {
         <div className="avatar" style={{background: '#9b59b6'}}>{targetUser.username?.[0]?.toUpperCase()}</div>
         <h2>@{targetUser.username}</h2>
         <p>BookMind Reader</p>
+        
+        <div style={{display: 'flex', gap: '20px', justifyContent: 'center', margin: '15px 0', fontSize: '0.9rem', color: '#666'}}>
+          <span><strong>{targetUser.followers_count || 0}</strong> Takipçi</span>
+          <span><strong>{targetUser.following_count || 0}</strong> Takip</span>
+        </div>
+        
+        {currentUser && currentUser.uid !== targetUserId && (
+          <button 
+            className={isFollowing ? "secondary-btn" : "primary-btn"}
+            onClick={handleFollowToggle}
+            disabled={followLoading}
+            style={{marginTop: '10px', minWidth: '120px'}}
+          >
+            {followLoading ? '...' : isFollowing ? '✓ Takip Ediliyor' : '+ Takip Et'}
+          </button>
+        )}
       </div>
       <div className="card-panel full-width"><h3>📚 Library of @{targetUser.username}</h3><RatingsTable ratings={ratings} onBookClick={onBookClick} /></div>
     </div>
   );
 }
 
-function BookDetailView({ bookId, user, onBack, showNotification }) {
+function BookDetailView({ bookId, user, onBack, showNotification, onBookClick }) {
   const [book, setBook] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -725,6 +794,75 @@ function BookDetailView({ bookId, user, onBack, showNotification }) {
             })}
           </div>
         </div>
+      </div>
+      
+      {/* Benzer Kitaplar Bölümü */}
+      <SimilarBooksSection bookId={bookId} onBookClick={onBookClick} />
+    </div>
+  );
+}
+
+// Benzer Kitaplar Komponenti
+function SimilarBooksSection({ bookId, onBookClick }) {
+  const [similarBooks, setSimilarBooks] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchSimilarBooks = async () => {
+      try {
+        const res = await fetch(`${API_URL}/books/${bookId}/similar`);
+        if (res.ok) {
+          const data = await res.json();
+          setSimilarBooks(data);
+        }
+      } catch (e) {
+        console.error("Benzer kitaplar yüklenemedi:", e);
+      }
+      setLoading(false);
+    };
+
+    fetchSimilarBooks();
+  }, [bookId]);
+
+  if (loading) return <div style={{padding: '20px', textAlign: 'center'}}>Benzer kitaplar yükleniyor...</div>;
+  if (similarBooks.length === 0) return null;
+
+  return (
+    <div style={{marginTop: '40px', padding: '20px', background: '#f8f9fa', borderRadius: '8px'}}>
+      <h3 style={{marginBottom: '20px'}}>📚 Benzer Kitaplar</h3>
+      <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '20px'}}>
+        {similarBooks.map((book, idx) => (
+          <div 
+            key={idx} 
+            style={{
+              cursor: 'pointer', 
+              textAlign: 'center',
+              transition: 'transform 0.2s',
+            }}
+            onClick={() => onBookClick(book.book_id)}
+            onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+            onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+          >
+            <img 
+              src={book.image_url} 
+              alt={book.title}
+              style={{
+                width: '100%',
+                height: '200px',
+                objectFit: 'cover',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                marginBottom: '10px'
+              }}
+            />
+            <div style={{fontSize: '0.85rem', fontWeight: 'bold', marginBottom: '5px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+              {book.title}
+            </div>
+            <div style={{fontSize: '0.75rem', color: '#666'}}>
+              {book.author}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -75,10 +75,107 @@ def get_user_info(user_id):
     
     if user_ref.exists:
         user_data = user_ref.to_dict()
+        
+        # Takipçi ve takip edilen sayılarını hesapla
+        followers_count = len(list(db.collection('followers').document(user_id).collection('user_followers').stream()))
+        following_count = len(list(db.collection('following').document(user_id).collection('user_following').stream()))
+        
         safe_data = {
             "uid": user_data['uid'],
             "username": user_data.get('username', 'Bilinmeyen Kullanıcı'),
-            "email": user_data.get('email')
+            "email": user_data.get('email'),
+            "followers_count": followers_count,
+            "following_count": following_count
         }
         return jsonify(safe_data), 200
     return jsonify({"error": "Kullanıcı bulunamadı"}), 404
+
+# Takip Et
+@auth_bp.route('/follow', methods=['POST'])
+def follow_user():
+    data = request.json
+    follower_id = data.get('follower_id')  # Takip eden kişi
+    following_id = data.get('following_id')  # Takip edilen kişi
+    
+    if follower_id == following_id:
+        return jsonify({"error": "Kendinizi takip edemezsiniz."}), 400
+    
+    db = firestore.client()
+    
+    # Follower'ın following listesine ekle
+    db.collection('following').document(follower_id).collection('user_following').document(following_id).set({
+        "followed_at": firestore.SERVER_TIMESTAMP
+    })
+    
+    # Following'in followers listesine ekle
+    db.collection('followers').document(following_id).collection('user_followers').document(follower_id).set({
+        "followed_at": firestore.SERVER_TIMESTAMP
+    })
+    
+    return jsonify({"message": "Takip başarılı"}), 200
+
+# Takipten Çık
+@auth_bp.route('/unfollow', methods=['POST'])
+def unfollow_user():
+    data = request.json
+    follower_id = data.get('follower_id')
+    following_id = data.get('following_id')
+    
+    db = firestore.client()
+    
+    # Follower'ın following listesinden çıkar
+    db.collection('following').document(follower_id).collection('user_following').document(following_id).delete()
+    
+    # Following'in followers listesinden çıkar
+    db.collection('followers').document(following_id).collection('user_followers').document(follower_id).delete()
+    
+    return jsonify({"message": "Takipten çıkıldı"}), 200
+
+# Takip Durumu Kontrolü
+@auth_bp.route('/is_following', methods=['GET'])
+def check_following():
+    follower_id = request.args.get('follower_id')
+    following_id = request.args.get('following_id')
+    
+    db = firestore.client()
+    doc = db.collection('following').document(follower_id).collection('user_following').document(following_id).get()
+    
+    return jsonify({"is_following": doc.exists}), 200
+
+# Takipçi Listesi
+@auth_bp.route('/user/<user_id>/followers', methods=['GET'])
+def get_followers(user_id):
+    db = firestore.client()
+    followers_ref = db.collection('followers').document(user_id).collection('user_followers').stream()
+    
+    followers = []
+    for doc in followers_ref:
+        follower_id = doc.id
+        user_doc = db.collection('users').document(follower_id).get()
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            followers.append({
+                "uid": follower_id,
+                "username": user_data.get('username', 'Unknown')
+            })
+    
+    return jsonify(followers), 200
+
+# Takip Edilenler Listesi
+@auth_bp.route('/user/<user_id>/following', methods=['GET'])
+def get_following(user_id):
+    db = firestore.client()
+    following_ref = db.collection('following').document(user_id).collection('user_following').stream()
+    
+    following = []
+    for doc in following_ref:
+        following_id = doc.id
+        user_doc = db.collection('users').document(following_id).get()
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+            following.append({
+                "uid": following_id,
+                "username": user_data.get('username', 'Unknown')
+            })
+    
+    return jsonify(following), 200
